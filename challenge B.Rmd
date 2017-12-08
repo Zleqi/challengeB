@@ -1,0 +1,232 @@
+---
+title: "challenge B"
+author: "WANG Yicheng, ZHAO Leqi,WANG Han"
+date: "2017/12/8"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Task 1B - Predicting house prices in Ames, Iowa (continued)
+Step 1 - Choose a ML technique. 
+
+Solution:
+We choose to use random forests because it has several advantages as following: 
+1.It can reduce the risk of overfitting.
+2.It runs efficiently on large databases.
+3.It can handle thousands of input variables without variable deletion.
+
+Step 2 - Train the chosen technique on the training data. 
+```{r housing-init, include=FALSE}
+load.libraries <- c('tidyverse','readr','randomForest','caret','dplyr','tidyr')
+install.lib <- load.libraries[!load.libraries %in% installed.packages()]
+for(libs in install.lib) install.packages(libs, dependencies = TRUE)
+sapply(load.libraries, require, character = TRUE)
+
+train <- read.csv("/Users/apple/Desktop/cha B/train.csv")
+test <- read.csv("/Users/apple/Desktop/cha B/test.csv")
+```
+
+```{r missing data, include=FALSE}
+ 
+train %>% summarise_all(.funs = funs(sum(is.na(.)))) %>% gather(key = "feature", value = "missing.observations") %>% filter(missing.observations > 0)
+
+remove.vars <- train %>% summarise_all(.funs = funs(sum(is.na(.)))) %>% gather(key = "feature", value = "missing.observations") %>% filter(missing.observations > 100) %>% select(feature) %>% unlist
+
+train <- train %>% select(- one_of(remove.vars))
+
+train %>% summarise_all(.funs = funs(sum(is.na(.)))) %>% gather(key = "feature", value = "missing.observations") %>% filter(missing.observations > 0)
+
+train <- train %>% filter(is.na(GarageType) == FALSE, is.na(MasVnrType) == FALSE, is.na(BsmtFinType2) == FALSE, is.na(BsmtExposure) == FALSE, is.na(Electrical) == FALSE)
+
+train %>% summarise_all(.funs = funs(sum(is.na(.)))) %>% gather(key = "feature", value = "missing.observations") %>% filter(missing.observations > 0)
+
+```
+
+```{r housing-step9-sol, include=FALSE}
+#Convert character to factors 
+cat_var <- train %>% summarise_all(.funs = funs(is.character(.))) %>% gather(key = "feature", value = "is.chr") %>% filter(is.chr == TRUE) %>% select(feature) %>% unlist
+# cat_var is the vector of variable names that are stored as character
+
+train %>% mutate_at(.cols = cat_var, .funs = as.factor)
+# i transform them all to factors
+
+```
+
+```{r housing-step10-sol, include=FALSE}
+lm_model_1 <- lm(SalePrice ~ ., data= train)
+summary(lm_model_1)
+
+sum_lm_model_1 <- summary(lm_model_1)$coefficients #take only the table of coefficients and t stats and pvalues
+class(sum_lm_model_1) #is a matrix
+significant.vars <- row.names(sum_lm_model_1[sum_lm_model_1[,4] <= 0.01,]) #sum_lm_model_1[,4] is the p-value of each coefficient, here then i choose the variables that have coefficients significant at the 1% level
+
+# choose any selection of such variables and run a more parcimonious model
+lm_model_2 <- lm(SalePrice ~ MSZoning + LotArea + Neighborhood  + YearBuilt + OverallQual, data = train)
+summary(lm_model_2)
+
+```
+
+```{r housing-rf-sol, include=FALSE}
+lm_model_3 <- randomForest(SalePrice ~ MSZoning + LotArea + Neighborhood  + YearBuilt + OverallQual, data = train)
+summary(lm_model_3)
+print(summary(lm_model_3))
+```
+
+Step 3 - Make predictions on the test data, and compare them to the predictions of a linear regression of your choice.
+```{r housing-step11-sol, include=FALSE}
+predictions <- cbind(Id = test$Id,SalePrice_predict = predict(lm_model_2, test, type="response"),SalePrice_predict1 = predict(lm_model_3, test,type="response"))
+```
+
+
+
+##Task 2B - Overfitting in Machine Learning (continued)
+```{r install and library, include=FALSE}
+load.libraries <- c('tidyverse','np','caret','dplyr')
+install.lib <- load.libraries[!load.libraries %in% installed.packages()]
+for(libs in install.lib) install.packages(libs, dependencies = TRUE)
+sapply(load.libraries, require, character = TRUE)
+```
+
+```{r build the model as we did in the past challengeA, include=FALSE}
+set.seed(1) 
+Nsim <- 150
+b <- c(0,1) 
+x0 <- rep(1, Nsim) 
+x1 <- rnorm(n = Nsim) 
+X <- cbind(x0, x1^3) 
+y.true <- X %*% b
+eps <- rnorm(n = Nsim) 
+y <- X %*% b + eps 
+df <- tbl_df(y[,1]) %>% rename(y = value) %>% bind_cols(tbl_df(x1)) %>% rename(x = value) %>% bind_cols(tbl_df(y.true[,1])) %>% rename(y.true = value)
+```
+
+```{r Split sample into training and testing, 80/20,echo=TRUE, include=FALSE}
+training.index <- createDataPartition(y = y, times = 1, p = 0.8)
+df <- df %>% mutate(which.data = ifelse(1:n() %in% training.index$Resample1, "training", "test"))
+training <- df %>% filter(which.data == "training")
+test <- df %>% filter(which.data == "test")
+```
+
+Step 1 - Estimate a low-flexibility local linear model on the training data.
+Train local linear model y ~ x on training, using default low flexibility
+```{r low flexibility, echo=FALSE}
+ll.fit.lowflex <- npreg(y ~ x, data = training, method = "ll", bws = 0.5)
+summary(ll.fit.lowflex)
+```
+
+Step 2 - Estimate a high-flexibility local linear model on the training data. 
+Train local linear model y ~ x on training, using default high flexibility 
+```{r high flexibility, echo=FALSE}
+ll.fit.highflex <- npreg(y ~ x, data = training, method = "ll", bws = 0.01)
+summary(ll.fit.highflex)
+```
+
+Step 3 - Plot the scatterplot of x-y,along with the predictions of ll.fit.lowflex and ll.fit.highflex, on only the training data.
+```{r plot1, include=FALSE}
+df <- df %>% mutate(y.ll.lowflex = predict(object = ll.fit.lowflex, newdata = df), y.ll.highflex = predict(object = ll.fit.highflex, newdata = df))
+training <- training %>% mutate(y.ll.lowflex = predict(object = ll.fit.lowflex, newdata = training), y.ll.highflex = predict(object = ll.fit.highflex, newdata = training))
+ggplot(training) + geom_point(mapping = aes(x = x, y = y)) + 
+  geom_line(mapping = aes(x = x, y = y.true))+
+  geom_line(mapping = aes(x = x, y = y.ll.lowflex),color="red") + 
+  geom_line(mapping = aes(x = x, y = y.ll.highflex), color = "blue")
+```
+
+Step 4 - interpretation(for the two models of training data):
+predictions of the high-flexibility local linear model  are more variable, because the high-flexibility one has a bigger R-squared than the low-flexibility one.
+predictions of he high-flexibility local linear model has the least bias because it has a smaller Residual standard error than the low-flexibility one.
+
+Step 5 - Plot the scatterplot of x-y
+Train local linear model y ~ x on test, using default low flexibility 
+```{r low flexibiliby, echo=FALSE}
+ll.fit.lowflex1 <- npreg(y ~ x, data = test, method = "ll", bws = 0.5)
+summary(ll.fit.lowflex1)
+```
+
+Train local linear model y ~ x on test, using default high flexibility 
+```{r high flexibiliby, echo=FALSE}
+ll.fit.highflex1 <- npreg(y ~ x, data = test, method = "ll", bws = 0.01)
+summary(ll.fit.highflex1)
+```
+
+Plot the scatterplot of x-y, along with the predictions of ll.fit.lowflex and ll.fit.highflex, on only the test data
+```{r plot2, include=FALSE}
+df <- df %>% mutate(y.ll.lowflex1 = predict(object = ll.fit.lowflex1, newdata = df), y.ll.highflex1 = predict(object = ll.fit.highflex1, newdata = df))
+test<- test %>% mutate(y.ll.lowflex1 = predict(object = ll.fit.lowflex1, newdata = test), y.ll.highflex1 = predict(object = ll.fit.highflex1, newdata = test))
+ggplot(test) + geom_point(mapping = aes(x = x, y = y)) + 
+  geom_line(mapping = aes(x = x, y = y.true))+
+  geom_line(mapping = aes(x = x, y = y.ll.lowflex1),color="red") + 
+  geom_line(mapping = aes(x = x, y = y.ll.highflex1), color = "blue")
+```
+interpretation(for the two models of test data):
+predictions of the high-flexibility local linear model  are more variable, because the high-flexibility one has a bigger R-squared than the low-flexibility one.
+predictions of he high-flexibility local linear model has the least bias because it has a smaller Residual standard error than the low-flexibility one.
+
+
+Step 6 - Create vector of several bandwidth
+```{r bandwidth, include=FALSE}
+bw <- seq(0.01, 0.5, by = 0.001)
+```
+
+
+Step 7 - Train local linear model y ~ x on training with each bandwidth
+```{r llbw, include=FALSE}
+llbw.fit <- lapply(X = bw, FUN = function(bw) {npreg(y ~ x, data = training, method = "ll", bws = bw)})
+```
+
+
+Step 8 - Compute for each bandwidth the MSE-training
+```{r mse.train, include=FALSE}
+mse.training <- function(fit.model){
+  predictions <- predict(object = fit.model, newdata = training)
+  training %>% mutate(squared.error = (y - predictions)^2) %>% summarize(mse = mean(squared.error))
+}
+mse.train.results <- unlist(lapply(X = llbw.fit, FUN = mse.training))
+```
+
+Step 9 - Compute for each bandwidth the MSE-test
+```{r mse.tes, include=FALSE}
+mse.test <- function(fit.model){
+  predictions <- predict(object = fit.model, newdata = test)
+  test %>% mutate(squared.error = (y - predictions)^2) %>% summarize(mse = mean(squared.error))
+}
+mse.test.results <- unlist(lapply(X = llbw.fit, FUN = mse.test))
+```
+
+Step 10 - Draw on the same plot how the MSE on training data, and test data, change when the bandwidth increases
+```{r plot3, include=FALSE}
+mse.df <- tbl_df(data.frame(bandwidth = bw, mse.train = mse.train.results, mse.test = mse.test.results))
+ggplot(mse.df, aes(x=bandwidth)) + 
+  geom_line(aes(y=mse.train,color="orange")) +
+  geom_line(aes(y=mse.test,color="blue"))
+```
+Conclude:
+the MSE on training data always increases when the bandwidth increases, but it increases quickly first and then it increases more slowly.
+first,the MSE on test data decreases with the increase in bandwidth; but then it increases when the bandwidth increases. 
+
+
+##Task 3B - Privacy regulation compliance in France
+Step 1 - Import the CNIL dataset from the Open Data Portal.
+```{r install, include=FALSE}
+load.libraries <- c('data.table','stringr')
+install.lib <- load.libraries[!load.libraries %in% installed.packages()]
+for(libs in install.lib) install.packages(libs, dependencies = TRUE)
+sapply(load.libraries, require, character = TRUE)
+```
+
+```{r import, include=FALSE}
+data <- fread('https://www.data.gouv.fr/s/resources/correspondants-informatique-et-libertes-cil/20171115-183631/OpenCNIL_Organismes_avec_CIL_VD_20171115.csv')
+head(data)
+attach(data)
+```
+
+Step 2 - Show a (nice) table with the number of organizations that has nominated a CNIL per department.
+```{r repon-2, echo=FALSE}
+cp<-c(data$Code_Postal)
+nb<-str_sub(cp,start = 1, end = 2)
+table<-as.data.frame(table(nb))
+table
+```
+
